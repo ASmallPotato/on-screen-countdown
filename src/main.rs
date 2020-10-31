@@ -12,6 +12,7 @@ use gtk::prelude::*;
 use gio::prelude::*;
 
 use gtk::{Window, WindowType, Button, DrawingArea};
+use cairo::{FontSlant, FontWeight};
 
 type Color = (f64, f64, f64);
 
@@ -78,7 +79,7 @@ struct TimerUI {
     inverted_background_color: Color,
     color: Color,
     inverted_color: Color,
-    font_size: f64,
+    font_size_multiplier: f64,
     canvas_size: CanvasSize,
 }
 
@@ -103,26 +104,42 @@ impl TimerUI {
     }
 
     fn draw_background(&self, cr: &cairo::Context, inverted: bool) {
-        let bg_color = if inverted {
-            self.inverted_background_color
+        if inverted {
+            let bg_color = self.inverted_background_color;
+            cr.set_source_rgb(bg_color.0, bg_color.1, bg_color.2);
+            cr.paint();
         } else {
-            self.background_color
-        };
-        cr.set_source_rgb(bg_color.0, bg_color.1, bg_color.2);
-        cr.paint();
+            let bg_color = self.background_color;
+            cr.set_source_rgba(bg_color.0, bg_color.1, bg_color.2, 0.1);
+            cr.set_operator(cairo::Operator::Source);
+            cr.paint();
+            cr.set_operator(cairo::Operator::Over);
+        }
     }
 
     fn draw_time(&self, cr: &cairo::Context, hms: HMS, inverted: bool) {
-        // TODO use pretty font // c.set_line_width(0.5);
         let color = if inverted {self.inverted_color} else {self.color};
         cr.set_source_rgb(color.0, color.1, color.2);
 
-        cr.set_font_size(self.font_size);
-        cr.move_to(self.canvas_size.x / 2. - 150., (self.canvas_size.y + self.font_size) / 2.);
+        let text = TimerUI::format_hms(hms);
+        cr.select_font_face(
+            "Block Digits",
+            FontSlant::Normal,
+            FontWeight::Normal
+        );
+        cr.set_font_size(self.canvas_size.y * self.font_size_multiplier);
+        let extents = cr.text_extents(&text);
+        let x = (self.canvas_size.x - extents.x_advance - extents.x_bearing) / 2.;
+        let y = (self.canvas_size.y + extents.height) / 2.;
+        cr.move_to(x, y);
+        cr.show_text(&text);
+    }
+
+    fn format_hms(hms: HMS) -> String {
         let sign = if hms.overtime { "+" } else { "" };
         let mut hours = hms.h.to_string() + ":";
         if hms.h == 0 { hours = String::from("") };
-        cr.show_text(&format!("{}{}{:0>2}:{:0>2}", sign, hours, hms.m, hms.s));
+        return format!("{}{}{:0>2}:{:0>2}", sign, hours, hms.m, hms.s);
     }
 
     pub fn refresh(area: &DrawingArea) {
@@ -154,9 +171,17 @@ fn main() {
 
     let window = Window::new(WindowType::Toplevel);
     window.set_title("on screen countdown");
-    window.set_default_size(350, 370);
+    window.set_default_size(500, 300);
     window.set_decorated(false);
-    window.set_opacity(0.4);
+    window.set_keep_above(true);
+
+    let screen = {
+        window.get_screen().expect("The application must be run with dispaly")
+    };
+    match screen.get_rgba_visual() {
+        Some(visual) => window.set_visual(Some(&visual)),
+        _ => println!("Transparent window not supported")
+    }
 
     let timer = Timer::new(Duration::from_secs(15 * 60));
     let rc_timer = Rc::new(RefCell::new(timer));
@@ -177,10 +202,10 @@ fn main() {
         color: (1., 1., 1.),
         inverted_color: (0., 0., 0.),
         background_color: (0.21, 0.2, 0.22),
-        inverted_background_color: (0.9, 0.0, 0.32),
+        inverted_background_color: (0.9, 0.0, 0.1),
         timer: Rc::clone(&rc_timer),
         canvas_size: CanvasSize { x: 0., y: 0. },
-        font_size: 72.0,
+        font_size_multiplier: 0.40,
     };
     let rc_timer_ui = Rc::new(RefCell::new(timer_ui));
 

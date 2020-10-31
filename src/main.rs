@@ -171,7 +171,7 @@ fn main() {
 
     let window = Window::new(WindowType::Toplevel);
     window.set_title("on screen countdown");
-    window.set_default_size(500, 300);
+    window.set_default_size(550, 300);
     window.set_decorated(false);
     window.set_keep_above(true);
 

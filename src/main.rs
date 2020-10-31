@@ -2,6 +2,7 @@
 
 extern crate cairo;
 extern crate gtk;
+extern crate glib;
 extern crate gio;
 
 use std::time::{SystemTime, Duration};
@@ -81,6 +82,8 @@ struct TimerUI {
     inverted_color: Color,
     font_size_multiplier: f64,
     canvas_size: CanvasSize,
+    last_flipped_at: SystemTime,
+    inverted: bool,
 }
 
 impl TimerUI {
@@ -96,15 +99,23 @@ impl TimerUI {
         self.draw(cr, hms);
     }
 
-    fn draw(&self, cr: &cairo::Context, hms: HMS) {
-        // TODO half second blink
-        let inverted = hms.overtime && hms.s % 2 == 0;
-        self.draw_background(cr, inverted);
-        self.draw_time(cr, hms, inverted);
+    fn draw(&mut self, cr: &cairo::Context, hms: HMS) {
+        if hms.overtime {
+            let now = SystemTime::now();
+            let delta = now.duration_since(self.last_flipped_at).unwrap();
+            if delta > Duration::from_millis(499) {
+                self.inverted = !self.inverted;
+                self.last_flipped_at = now;
+            }
+        } else if self.inverted {
+            self.inverted = false;
+        }
+        self.draw_background(cr);
+        self.draw_time(cr, hms);
     }
 
-    fn draw_background(&self, cr: &cairo::Context, inverted: bool) {
-        if inverted {
+    fn draw_background(&self, cr: &cairo::Context) {
+        if self.inverted {
             let bg_color = self.inverted_background_color;
             cr.set_source_rgb(bg_color.0, bg_color.1, bg_color.2);
             cr.paint();
@@ -117,8 +128,8 @@ impl TimerUI {
         }
     }
 
-    fn draw_time(&self, cr: &cairo::Context, hms: HMS, inverted: bool) {
-        let color = if inverted {self.inverted_color} else {self.color};
+    fn draw_time(&self, cr: &cairo::Context, hms: HMS) {
+        let color = if self.inverted {self.inverted_color} else {self.color};
         cr.set_source_rgb(color.0, color.1, color.2);
 
         let text = TimerUI::format_hms(hms);
@@ -129,7 +140,9 @@ impl TimerUI {
         );
         cr.set_font_size(self.canvas_size.y * self.font_size_multiplier);
         let extents = cr.text_extents(&text);
-        let x = (self.canvas_size.x - extents.x_advance - extents.x_bearing) / 2.;
+        let x = {
+            (self.canvas_size.x - extents.x_advance - extents.x_bearing) / 2.
+        };
         let y = (self.canvas_size.y + extents.height) / 2.;
         cr.move_to(x, y);
         cr.show_text(&text);
@@ -206,6 +219,8 @@ fn main() {
         timer: Rc::clone(&rc_timer),
         canvas_size: CanvasSize { x: 0., y: 0. },
         font_size_multiplier: 0.40,
+        last_flipped_at: SystemTime::now(),
+        inverted: false,
     };
     let rc_timer_ui = Rc::new(RefCell::new(timer_ui));
 
@@ -216,11 +231,12 @@ fn main() {
 
     window.show_all();
 
-    let sleep_dur = Duration::new(0, 50_000_000);
-    loop {
-        TimerUI::refresh(&area);
-        gtk::main_iteration_do(false);
-
-        std::thread::sleep(sleep_dur);
-    }
+    glib::timeout_add_local(
+        500,
+        move || {
+            window.queue_draw();
+            Continue(true)
+        }
+    );
+    gtk::main();
 }
